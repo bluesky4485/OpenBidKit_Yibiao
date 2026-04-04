@@ -3,7 +3,7 @@
  */
 import React, { useState } from 'react';
 import { OutlineData, OutlineItem } from '../types';
-import { collectSseText, expandApi, getErrorMessage, outlineApi } from '../services/api';
+import { expandApi, getErrorMessage, outlineApi, readSseStream } from '../services/api';
 import { ChevronRightIcon, ChevronDownIcon, DocumentTextIcon, PencilIcon, TrashIcon, PlusIcon } from '@heroicons/react/24/outline';
 
 interface OutlineEditProps {
@@ -22,7 +22,7 @@ const OutlineEdit: React.FC<OutlineEditProps> = ({
   const [generating, setGenerating] = useState(false);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [streamingContent, setStreamingContent] = useState('');
+  const [progressLogs, setProgressLogs] = useState<string[]>([]);
   const [editingItem, setEditingItem] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -65,7 +65,7 @@ const OutlineEdit: React.FC<OutlineEditProps> = ({
     try {
       setGenerating(true);
       setMessage(null);
-      setStreamingContent('');
+      setProgressLogs([]);
 
       const response = await outlineApi.generateOutlineStream({
         overview: projectOverview,
@@ -75,40 +75,49 @@ const OutlineEdit: React.FC<OutlineEditProps> = ({
         old_document: oldDocument || undefined,
       });
 
-      const result = await collectSseText(
+      let outlineResult: OutlineData | null = null;
+      await readSseStream(
         response,
-        (fullText) => {
-          setStreamingContent(fullText);
+        (event) => {
+          if (event.error) {
+            throw new Error(event.message || '目录生成失败');
+          }
+
+          if (event.type === 'progress' && event.message) {
+            setProgressLogs(prev => [...prev, event.message || '']);
+            return;
+          }
+
+          if (event.type === 'result' && event.outline) {
+            outlineResult = event.outline;
+          }
         },
         '目录生成失败'
       );
 
-      // 解析最终结果
-      try {
-        const outlineJson = JSON.parse(result);
-        onOutlineGenerated(outlineJson);
-        setMessage({ type: 'success', text: '目录结构生成完成' });
-        setStreamingContent(''); // 清空流式内容
-        
-        // 默认展开所有项目
-        const allIds = new Set<string>();
-        const collectIds = (items: OutlineItem[]) => {
-          items.forEach(item => {
-            allIds.add(item.id);
-            if (item.children) {
-              collectIds(item.children);
-            }
-          });
-        };
-        collectIds(outlineJson.outline);
-        setExpandedItems(allIds);
-        
-      } catch {
-        throw new Error('解析目录结构失败');
+      if (!outlineResult) {
+        throw new Error('未收到目录生成结果');
       }
+
+      const finalOutline = outlineResult as OutlineData;
+
+      onOutlineGenerated(finalOutline);
+      setMessage({ type: 'success', text: '目录结构生成完成' });
+
+      // 默认展开所有项目
+      const allIds = new Set<string>();
+      const collectIds = (items: OutlineItem[]) => {
+        items.forEach(item => {
+          allIds.add(item.id);
+          if (item.children) {
+            collectIds(item.children);
+          }
+        });
+      };
+      collectIds(finalOutline.outline);
+      setExpandedItems(allIds);
     } catch (error) {
       setMessage({ type: 'error', text: getErrorMessage(error, '目录生成失败') });
-      setStreamingContent(''); // 出错时也清空
     } finally {
       setGenerating(false);
     }
@@ -537,14 +546,20 @@ const OutlineEdit: React.FC<OutlineEditProps> = ({
           </div>
         )}
 
-        {/* 流式生成内容显示 */}
-        {generating && streamingContent && (
+        {/* 生成过程显示 */}
+        {progressLogs.length > 0 && (
           <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
-            <h4 className="text-sm font-medium text-blue-800 mb-2">正在生成目录结构...</h4>
+            <h4 className="text-sm font-medium text-blue-800 mb-2">
+              {generating ? '正在生成目录结构...' : '本次生成过程'}
+            </h4>
             <div className="bg-white p-3 rounded border max-h-48 overflow-y-auto">
-              <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono">
-                {streamingContent}
-              </pre>
+              <div className="space-y-2 text-xs text-gray-700">
+                {progressLogs.map((log, index) => (
+                  <p key={`${index}-${log}`} className="whitespace-pre-wrap leading-5">
+                    {log}
+                  </p>
+                ))}
+              </div>
             </div>
           </div>
         )}

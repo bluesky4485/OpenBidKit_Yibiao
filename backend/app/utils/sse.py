@@ -47,6 +47,16 @@ def sse_chunk(chunk: str) -> str:
     return sse_data({"chunk": chunk})
 
 
+def sse_progress(message: str) -> str:
+    """输出进度事件。"""
+    return sse_data({"type": "progress", "message": message})
+
+
+def sse_result(payload: Dict[str, Any]) -> str:
+    """输出结果事件。"""
+    return sse_data({"type": "result", **payload})
+
+
 def sse_error(message: str) -> str:
     """输出统一错误事件。"""
     return sse_data({"error": True, "message": message})

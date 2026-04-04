@@ -1,8 +1,9 @@
 """数据模型定义"""
 
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class ConfigRequest(BaseModel):
@@ -71,6 +72,19 @@ class OutlineResponse(BaseModel):
     """目录响应"""
 
     outline: List[OutlineItem]
+
+
+class OutlineChildrenResponse(BaseModel):
+    """指定一级目录下的子目录响应。"""
+
+    children: List[OutlineItem]
+
+
+class OutlineReviewResponse(BaseModel):
+    """目录审核响应。"""
+
+    passed: bool
+    suggestions: List[str] = Field(default_factory=list)
 
 
 class OutlineRequest(BaseModel):

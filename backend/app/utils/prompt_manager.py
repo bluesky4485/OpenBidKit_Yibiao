@@ -81,7 +81,47 @@ JSON 格式要求：
 """
 
 
-def generate_outline_prompt(overview: str, requirements: str) -> List[Dict[str, str]]:
+def _build_top_level_outline_system_prompt() -> str:
+    """构建仅生成一级目录的系统提示词。"""
+    return """你是一个专业的标书编写专家。根据提供的项目概述和技术评分要求，生成投标文件中技术标部分的一级目录结构。
+如果用户提供了自己编写的目录，你要保证一级目录满足技术评分要求，并充分结合用户自己编写的目录。
+
+要求：
+1. 只生成一级目录，不要生成二级和三级目录
+2. 一级目录名称要专业、准确，符合投标文件规范
+3. 一级目录名称要尽量与技术评分要求中的章节名称一致；如果技术评分要求中没有明确章节名称，则结合内容总结一级目录名称
+4. 返回标准 JSON 格式，使用 outline 字段，每个一级目录必须包含 id、title、description
+5. 除了 JSON 结果外，不要输出任何其他内容
+
+JSON 格式要求：
+{
+  "outline": [
+    {
+      "id": "1",
+      "title": "",
+      "description": ""
+    }
+  ]
+}
+"""
+
+
+def _format_revision_suggestions(suggestions: list[str] | None) -> str:
+    """格式化目录修正建议。"""
+    if not suggestions:
+        return ""
+
+    suggestion_lines = [
+        f"{index}. {item}" for index, item in enumerate(suggestions, start=1)
+    ]
+    return "\n\n本轮修正建议：\n" + "\n".join(suggestion_lines)
+
+
+def generate_outline_prompt(
+    overview: str,
+    requirements: str,
+    suggestions: list[str] | None = None,
+) -> List[Dict[str, str]]:
     """生成标准目录的提示词。"""
     return [
         {"role": "system", "content": _build_outline_system_prompt()},
@@ -89,7 +129,8 @@ def generate_outline_prompt(overview: str, requirements: str) -> List[Dict[str, 
         {"role": "user", "content": f"技术评分要求：\n{requirements}"},
         {
             "role": "user",
-            "content": "请生成完整的技术标目录结构，确保覆盖所有技术评分要点。",
+            "content": "请生成完整的技术标目录结构，确保覆盖所有技术评分要点。"
+            + _format_revision_suggestions(suggestions),
         },
     ]
 
@@ -98,6 +139,7 @@ def generate_outline_with_old_prompt(
     overview: str,
     requirements: str,
     old_outline: str | None,
+    suggestions: list[str] | None = None,
 ) -> List[Dict[str, str]]:
     """生成基于旧目录扩写的提示词。"""
     return [
@@ -107,7 +149,171 @@ def generate_outline_with_old_prompt(
         {"role": "user", "content": f"用户自己编写的目录：\n{old_outline or ''}"},
         {
             "role": "user",
-            "content": "请在满足技术评分要求的前提下，充分结合用户自己编写的目录，生成完整的技术标目录结构。",
+            "content": "请在满足技术评分要求的前提下，充分结合用户自己编写的目录，生成完整的技术标目录结构。"
+            + _format_revision_suggestions(suggestions),
+        },
+    ]
+
+
+def generate_top_level_outline_prompt(
+    overview: str,
+    requirements: str,
+    suggestions: list[str] | None = None,
+) -> List[Dict[str, str]]:
+    """生成仅包含一级目录的提示词。"""
+    return [
+        {"role": "system", "content": _build_top_level_outline_system_prompt()},
+        {"role": "user", "content": f"项目概述：\n{overview}"},
+        {"role": "user", "content": f"技术评分要求：\n{requirements}"},
+        {
+            "role": "user",
+            "content": "请仅生成一级目录列表，不要生成二级和三级目录。返回的 JSON 仍然使用 outline 字段，每个一级目录都必须包含 id、title、description。"
+            + _format_revision_suggestions(suggestions),
+        },
+    ]
+
+
+def generate_top_level_outline_with_old_prompt(
+    overview: str,
+    requirements: str,
+    old_outline: str | None,
+    suggestions: list[str] | None = None,
+) -> List[Dict[str, str]]:
+    """生成结合旧目录的一级目录提示词。"""
+    return [
+        {"role": "system", "content": _build_top_level_outline_system_prompt()},
+        {"role": "user", "content": f"项目概述：\n{overview}"},
+        {"role": "user", "content": f"技术评分要求：\n{requirements}"},
+        {"role": "user", "content": f"用户自己编写的目录：\n{old_outline or ''}"},
+        {
+            "role": "user",
+            "content": "请在满足技术评分要求的前提下，充分结合用户自己编写的目录，仅生成一级目录，不要生成二级和三级目录。返回的 JSON 使用 outline 字段，每个一级目录都必须包含 id、title、description。"
+            + _format_revision_suggestions(suggestions),
+        },
+    ]
+
+
+def generate_children_outline_prompt(
+    overview: str,
+    requirements: str,
+    parent_item: Dict[str, Any],
+    suggestions: list[str] | None = None,
+) -> List[Dict[str, str]]:
+    """为指定一级目录生成二三级目录。"""
+    parent_id = parent_item.get("id", "1")
+    parent_title = parent_item.get("title", "未命名一级目录")
+    parent_description = parent_item.get("description", "")
+
+    system_prompt = """你是一个专业的标书编写专家。请围绕指定的一级目录，生成其下属的二级目录和三级目录。
+
+要求：
+1. 只输出当前一级目录下的二级和三级目录，不要重复输出一级目录本身
+2. 返回标准 JSON，格式为 {"children": [...]} 
+3. children 中只能包含当前一级目录的直接子目录，每个节点必须包含 id、title、description
+4. 二级目录下如有三级目录，同样使用 children 字段
+5. 章节编号必须以给定的一级目录编号为前缀，例如父级是 2，则二级目录编号从 2.1 开始，三级目录编号从 2.1.1 开始
+6. 除了 JSON 结果外，不要输出任何其他内容
+"""
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"项目概述：\n{overview}"},
+        {"role": "user", "content": f"技术评分要求：\n{requirements}"},
+        {
+            "role": "user",
+            "content": f"当前一级目录：\n编号：{parent_id}\n标题：{parent_title}\n描述：{parent_description}",
+        },
+        {
+            "role": "user",
+            "content": '请仅生成该一级目录下的二级、三级目录，返回格式必须是 {"children": [...]}。'
+            + _format_revision_suggestions(suggestions),
+        },
+    ]
+
+
+def generate_children_outline_with_old_prompt(
+    overview: str,
+    requirements: str,
+    parent_item: Dict[str, Any],
+    old_outline: str | None,
+    suggestions: list[str] | None = None,
+) -> List[Dict[str, str]]:
+    """为指定一级目录生成二三级目录，并结合旧目录参考。"""
+    messages = generate_children_outline_prompt(
+        overview=overview,
+        requirements=requirements,
+        parent_item=parent_item,
+        suggestions=suggestions,
+    )
+    messages.insert(
+        4, {"role": "user", "content": f"用户自己编写的目录：\n{old_outline or ''}"}
+    )
+    messages[-1] = {
+        "role": "user",
+        "content": '请在满足技术评分要求的前提下，充分结合用户自己编写的目录，仅生成该一级目录下的二级、三级目录，返回格式必须是 {"children": [...]}。'
+        + _format_revision_suggestions(suggestions),
+    }
+    return messages
+
+
+def review_outline_messages(
+    overview: str,
+    requirements: str,
+    outline_json: str,
+) -> List[Dict[str, str]]:
+    """构建目录审核消息。"""
+    system_prompt = """你是一个严格的招标文件目录审核专家。请审核目录是否符合项目概述和技术评分要求。
+
+要求：
+1. 重点检查目录是否完整覆盖技术评分要点
+2. 检查一级目录名称是否专业、准确，是否尽量与评分项原文保持一致
+3. 检查目录层级是否清晰，是否达到三级目录要求，是否存在明显遗漏、错位、重复或不合理章节
+4. 只返回 JSON，格式为：{"passed": true, "suggestions": []}
+5. 若不通过，suggestions 中必须给出具体、可执行的修改建议
+6. 除了 JSON 外，不要输出任何其他内容
+"""
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"项目概述：\n{overview}"},
+        {"role": "user", "content": f"技术评分要求：\n{requirements}"},
+        {"role": "user", "content": f"待审核目录 JSON：\n{outline_json}"},
+        {
+            "role": "user",
+            "content": "请判断该目录是否满足要求。若满足则返回 passed=true；若不满足则返回 passed=false，并给出具体修改建议。",
+        },
+    ]
+
+
+def build_json_repair_messages(
+    invalid_content: str,
+    issues: list[str],
+    target_description: str,
+) -> List[Dict[str, str]]:
+    """构建 JSON 定向修复消息。"""
+    issue_lines = [f"{index}. {item}" for index, item in enumerate(issues, start=1)]
+
+    system_prompt = """你是一个严格的 JSON 修复助手。请根据给出的原始内容和校验问题，修复现有结果。
+
+要求：
+1. 优先在原结果基础上做最小必要修改，不要整体重写
+2. 尽量保留原有结构、字段值、节点顺序和已生成内容
+3. 若缺少必填字段，应结合现有上下文补齐合理内容，不要用空字符串敷衍
+4. 若存在多余说明、代码块包裹、字段名错误、children 结构不规范或顶层包裹错误，应修正为合法 JSON
+5. 只返回修复后的完整 JSON，不要输出任何解释
+"""
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"目标结果类型：{target_description}"},
+        {"role": "user", "content": "当前校验问题：\n" + "\n".join(issue_lines)},
+        {
+            "role": "user",
+            "content": f"待修复内容：\n```json\n{invalid_content}\n```",
+        },
+        {
+            "role": "user",
+            "content": "请在保留原有正确内容的前提下，仅修复上述问题，并返回完整 JSON。",
         },
     ]
 

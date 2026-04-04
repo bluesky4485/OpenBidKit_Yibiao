@@ -50,7 +50,9 @@ export interface WordExportRequest {
 }
 
 export interface StreamEvent {
+  type?: 'progress' | 'result';
   chunk?: string;
+  outline?: OutlineData;
   error?: boolean;
   message?: string;
 }
