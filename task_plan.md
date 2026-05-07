@@ -67,6 +67,8 @@
 | --- | --- | --- |
 | 普通 Node 环境 require `updateService.cjs` 时 `electron-updater` 立即访问 Electron app 并报 `Cannot read properties of undefined (reading 'getVersion')` | 第一次模块加载验证 | 将 `electron-updater` 改为 `setupAutoUpdate()` 内、且 `app.isPackaged` 后懒加载 |
 | Windows 本地打包解压 `winCodeSign` 时因当前用户无符号链接权限失败 | 第一次 Windows unpacked 打包验证 | 当前阶段不做签名，关闭 `win.signAndEditExecutable`，避免触发 winCodeSign 资源编辑链路 |
+| Actions 成功但 Release 没有产物 | 首次 `v2.0.1` 远程发布验证 | 改为 `electron-builder --publish never` 只构建，再用 `gh release upload --clobber` 显式上传产物，避免 `existingType=release publishingType=draft` 冲突 |
+| Release 说明只有 `Full Changelog` | 首次 `v2.0.1` 远程发布验证 | 改为 workflow 用 `git log` 生成提交列表，并在 Release 已存在时用 `gh release edit --notes-file` 更新说明 |
 
 ## Current Task: GitHub Release 自动打包与客户端更新检查
 

@@ -33,7 +33,8 @@
       {
         "provider": "github",
         "owner": "FB208",
-        "repo": "OpenBidKit_Yibiao"
+        "repo": "OpenBidKit_Yibiao",
+        "releaseType": "release"
       }
     ],
     "win": {

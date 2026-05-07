@@ -22,3 +22,4 @@
 - 已完成 toolbar 拖动与页面内部滚动优化：`FloatingToolbar` 增加拖动手柄和边界约束；全局布局改为 `100vh` 内部滚动；设置页拆成内部滚动层和悬浮工具条层；移除 toolbar 底部预留空间；`client/开发说明.md` 已补充规则；`npm run build` 和 `git diff --check` 通过。
 - 开始 GitHub Release 自动打包与更新检查：目标是 `v*` tag 触发 Windows/macOS 构建，自动生成 Release notes，并在打包客户端启动时检查 GitHub Release 更新。
 - 已完成 GitHub Release 自动打包与更新检查：安装 `electron-builder` / `electron-updater`；补齐 `client/package.json` 打包配置；新增 `.github/workflows/release.yml`；新增 `updateService.cjs` 并接入主进程；更新开发说明；`npm run build`、`npm audit`、`updateService` 模块加载、Windows unpacked 和 NSIS 打包验证通过。
+- 已修复首次远程发布验证问题：`v2.0.1` Actions 成功但 Release 无产物，是因为正式 Release 与 electron-builder 默认 draft 发布类型冲突；workflow 已改为构建后用 `gh release upload --clobber` 显式上传，同时 Release notes 改为基于 `git log` 生成，并支持手动输入已有 tag 重新发布。

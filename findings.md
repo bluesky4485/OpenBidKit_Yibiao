@@ -26,3 +26,5 @@
 - GitHub Release 发布调研：当前远程仓库为 `FB208/OpenBidKit_Yibiao`，`electron-builder` 可直接使用 GitHub provider 上传安装包和 `latest.yml` / `latest-mac.yml` 更新元数据。
 - 自动更新实现调研：`electron-updater` 在普通 Node 环境 require 会访问 Electron app，因此必须在 `app.isPackaged` 后懒加载；开发模式跳过更新检查。
 - Windows 本地打包调研：未签名阶段仍可能触发 `winCodeSign` 资源编辑链路，当前 Windows 用户没有创建符号链接权限会导致解压失败；关闭 `win.signAndEditExecutable` 后 NSIS 安装包验证通过。
+- v2.0.1 Release 空产物根因：workflow 先用 `gh release create` 创建了正式 Release，但 `electron-builder --publish always` 默认以 draft 发布类型工作，日志显示 `existingType=release publishingType=draft`，因此所有安装包、blockmap 和 `latest*.yml` 都被跳过上传。
+- v2.0.1 Release 说明只有 `Full Changelog` 根因：GitHub `--generate-notes` 在没有可识别 PR/分组内容时只生成比较链接；改为 workflow 内显式用 `git log` 生成提交列表更可控。
