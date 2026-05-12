@@ -1,6 +1,7 @@
 import type { AiStreamEvent, ChatCompletionRequest, JsonCompletionRequest } from './ai';
 import type { FileImportResult } from './bid';
 import type { ClientConfig, ConfigSaveResult, ImageModelTestResult, ModelListResult } from './config';
+import type { KnowledgeBaseEvent, KnowledgeBaseIndex, KnowledgeBaseUploadResult, KnowledgeDocument, KnowledgeFolder, KnowledgeItem } from '../../features/knowledge-base/types';
 
 export interface TaskEvent<TState = unknown> {
   task: unknown;
@@ -55,6 +56,14 @@ export interface YibiaoBridge {
   };
   file: {
     importDocument: () => Promise<FileImportResult>;
+  };
+  knowledgeBase: {
+    list: () => Promise<KnowledgeBaseIndex>;
+    createFolder: (name: string) => Promise<KnowledgeFolder>;
+    uploadDocuments: (folderId: string) => Promise<KnowledgeBaseUploadResult>;
+    readMarkdown: (documentId: string) => Promise<string>;
+    readItems: (documentId: string) => Promise<KnowledgeItem[]>;
+    onEvent: (callback: (event: KnowledgeBaseEvent) => void) => () => void;
   };
   workspace: {
     loadTechnicalPlan: <TState = unknown>() => Promise<TState | null>;

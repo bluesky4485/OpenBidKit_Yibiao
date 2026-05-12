@@ -49,6 +49,18 @@ const bridge = {
   file: {
     importDocument: () => ipcRenderer.invoke('file:import-document'),
   },
+  knowledgeBase: {
+    list: () => ipcRenderer.invoke('knowledge-base:list'),
+    createFolder: (name) => ipcRenderer.invoke('knowledge-base:create-folder', name),
+    uploadDocuments: (folderId) => ipcRenderer.invoke('knowledge-base:upload-documents', folderId),
+    readMarkdown: (documentId) => ipcRenderer.invoke('knowledge-base:read-markdown', documentId),
+    readItems: (documentId) => ipcRenderer.invoke('knowledge-base:read-items', documentId),
+    onEvent: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('knowledge-base:event', listener);
+      return () => ipcRenderer.removeListener('knowledge-base:event', listener);
+    },
+  },
   workspace: {
     loadTechnicalPlan: () => ipcRenderer.invoke('workspace:load-technical-plan'),
     saveTechnicalPlan: (state) => ipcRenderer.invoke('workspace:save-technical-plan', state),
