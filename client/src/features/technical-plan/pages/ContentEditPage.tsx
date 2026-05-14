@@ -378,6 +378,8 @@ function ContentEditPage({ outlineData, projectOverview, referenceKnowledgeDocum
     }
 
     try {
+      const config = await window.yibiao?.config.load();
+      const shouldRealTimeRender = config?.real_time_render !== false;
       const regenerate = leaves.length > 0 && completedCount === leaves.length;
       const nextOutlineData = regenerate ? await onContentReset() : outlineData;
       if (regenerate) {
@@ -395,6 +397,7 @@ function ContentEditPage({ outlineData, projectOverview, referenceKnowledgeDocum
           maxAiImages: generationOptions.maxAiImages,
           useMermaidImages: generationOptions.useMermaidImages,
         },
+        real_time_render: shouldRealTimeRender,
       });
       setGenerationDialogOpen(false);
       showToast(regenerate ? '正文重新生成任务已在后台启动' : '正文生成任务已在后台启动', 'success');
@@ -409,6 +412,8 @@ function ContentEditPage({ outlineData, projectOverview, referenceKnowledgeDocum
     }
 
     try {
+      const config = await window.yibiao?.config.load();
+      const shouldRealTimeRender = config?.real_time_render !== false;
       await window.yibiao?.tasks.startContentGeneration({
         outlineData,
         projectOverview: outlineData.project_overview || projectOverview,
@@ -416,6 +421,7 @@ function ContentEditPage({ outlineData, projectOverview, referenceKnowledgeDocum
         regenerate: true,
         targetItemId: requirementItem.id,
         requirement: regenerateRequirement,
+        real_time_render: shouldRealTimeRender,
       });
       setSelectedItemId(requirementItem.id);
       setRequirementItem(null);

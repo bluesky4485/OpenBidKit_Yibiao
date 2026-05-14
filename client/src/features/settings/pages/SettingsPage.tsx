@@ -151,6 +151,7 @@ const initialState: SettingsPageState = {
   },
   general: {
     developer_mode: false,
+    real_time_render: true,
   },
 };
 
@@ -220,6 +221,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
         fileParser: config.file_parser,
         general: {
           developer_mode: Boolean(config.developer_mode),
+          real_time_render: config.real_time_render !== false,
         },
       }));
       setSavedConfig(config);
@@ -237,6 +239,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
     image_model: state.imageModel,
     file_parser: state.fileParser,
     developer_mode: state.general.developer_mode,
+    real_time_render: state.general.real_time_render,
   });
 
   const updateImageModelConfig = (partial: Partial<ImageModelConfig>) => {
@@ -272,6 +275,13 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
       general: { ...prev.general, developer_mode: developerMode },
     }));
     onDeveloperModeChange?.(developerMode);
+  };
+
+  const updateRealTimeRender = (realTimeRender: boolean) => {
+    setState((prev) => ({
+      ...prev,
+      general: { ...prev.general, real_time_render: realTimeRender },
+    }));
   };
 
   const testTextConfig = async () => {
@@ -418,7 +428,8 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
     }
 
     if (activeTab === 'general') {
-      return Boolean(state.general.developer_mode) !== Boolean(savedConfig.developer_mode);
+      return Boolean(state.general.developer_mode) !== Boolean(savedConfig.developer_mode)
+        || Boolean(state.general.real_time_render) !== (savedConfig.real_time_render !== false);
     }
 
     if (activeTab === 'image-model') {
@@ -537,6 +548,22 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
                 <option value="classic">经典布局</option>
               </select>
             </div>
+            <label className="settings-row">
+              <div className="settings-row-copy">
+                <strong>实时渲染</strong>
+                <span>生成过程中卡顿，可关闭实时渲染以提升性能</span>
+              </div>
+              <span className="settings-switch-control">
+                <input
+                  type="checkbox"
+                  checked={state.general.real_time_render}
+                  onChange={(event) => updateRealTimeRender(event.target.checked)}
+                />
+                <span className="settings-switch-track" aria-hidden="true">
+                  <span className="settings-switch-thumb" />
+                </span>
+              </span>
+            </label>
             <label className="settings-row">
               <div className="settings-row-copy">
                 <strong>开发者模式</strong>

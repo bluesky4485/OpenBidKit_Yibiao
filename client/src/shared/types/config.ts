@@ -48,4 +48,5 @@ export interface ClientConfig extends AiConfig {
   image_model: ImageModelConfig;
   file_parser: FileParserConfig;
   developer_mode?: boolean;
+  real_time_render?: boolean;
 }

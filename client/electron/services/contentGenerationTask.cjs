@@ -889,6 +889,7 @@ async function runContentGenerationTask({ aiService, workspaceStore, knowledgeBa
   const regenerateRequirement = String(payload.requirement || '').trim();
   const concurrency = Math.max(1, Math.min(Number(payload.concurrency) || 5, 8));
   const generationOptions = payload.generationOptions || payload.generation_options || {};
+  const realTimeRender = payload.real_time_render !== false && payload.realTimeRender !== false;
   const referenceKnowledgeDocumentIds = normalizeReferenceDocumentIds(payload, storedPlan);
   const imageAvailability = aiService.getImageModelAvailability
     ? aiService.getImageModelAvailability()
@@ -939,6 +940,9 @@ async function runContentGenerationTask({ aiService, workspaceStore, knowledgeBa
   logs = [...logs, mermaidImagesEnabled
     ? 'Mermaid 图片已启用，适合简单图示的小节会优先使用 Mermaid 图。'
     : 'Mermaid 图片未启用。'];
+  if (!realTimeRender) {
+    logs = [...logs, '实时渲染已关闭，每个小节生成完成后再刷新正文。'];
+  }
   knowledgeItems = loadContentKnowledgeItems(knowledgeBaseService, referenceKnowledgeDocumentIds, (message) => {
     logs = [...logs, message];
   });
@@ -1157,7 +1161,7 @@ async function runContentGenerationTask({ aiService, workspaceStore, knowledgeBa
         }
         rawContent += event.chunk;
         content = stripRepeatedChapterTitle(normalizeGeneratedMarkdown(rawContent), item);
-        if (!isSingleSectionRegeneration) {
+        if (realTimeRender && !isSingleSectionRegeneration) {
           saveSection(item, { status: 'running', content, error: undefined }, content);
         }
       });

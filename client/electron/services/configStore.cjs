@@ -20,6 +20,7 @@ const defaultConfig = {
     mineru_token: '',
   },
   developer_mode: false,
+  real_time_render: true,
 };
 
 function normalizeConfig(config) {
