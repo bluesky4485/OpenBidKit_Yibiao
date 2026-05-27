@@ -1,5 +1,28 @@
 # Task Plan
 
+## Current Task: DOC/WPS 本地转换后端自动识别
+
+### Goal
+让上传 `.doc` / `.wps` 时不再只依赖 LibreOffice；在 Windows 桌面端自动尝试 WPS、Microsoft Word 和 LibreOffice，哪个能成功转换为 `.docx` 就使用哪个，并保持后续 Markdown 解析链路不变。
+
+### Phases
+- [completed] 1. 梳理当前 legacy Word 转换入口和错误提示边界。
+- [completed] 2. 在 `doc2markdown/convert.mjs` 中实现多后端候选转换：LibreOffice CLI + Windows WPS/Word COM。
+- [completed] 3. 更新 Main/Renderer 缺失提示文案，避免继续只提示安装 LibreOffice。
+- [completed] 4. 运行语法检查、客户端构建和 diff 检查。
+
+### Decisions
+- 保留当前 `.doc/.wps -> .docx -> mammoth -> Markdown` 主链路，只替换前置转换后端选择。
+- 自动识别以实际转换成功并产出 `.docx` 为准，不只依赖 exe 路径或注册表存在。
+- WPS/Word COM 仅在 Windows 启用；其他平台继续走 LibreOffice。
+- 不新增依赖，Windows COM 转换通过系统 PowerShell 调用 `New-Object -ComObject`。
+
+### Errors Encountered
+| Error | Attempt | Resolution |
+| --- | --- | --- |
+| planning skill 示例路径 `~/.opencode/.../session-catchup.py` 不存在 | 第一次 catchup | 改用实际路径 `~/.config/opencode/.../session-catchup.py` |
+| 无真实 `.doc/.wps` 样本可用于端到端转换验证 | 本轮验证 | 完成语法、模块导入和构建验证；实际转换需在安装 WPS/Word/LibreOffice 的桌面环境用真实文件复验 |
+
 ## Current Task: 废标项检查流式检查与单项重试
 
 ### Goal

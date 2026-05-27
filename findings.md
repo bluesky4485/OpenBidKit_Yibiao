@@ -1,6 +1,13 @@
 # Findings
 
 ## Research Log
+- 当前 `.doc/.wps` 本地解析入口是 `client/electron/services/doc2markdown/convert.mjs` 的 `withLegacyWordDocxFile()`：先找 LibreOffice `soffice`，再 `--headless --convert-to docx`，成功后继续用 `mammoth.convertToHtml()` 转 Markdown。
+- `.doc/.wps` 转换也被 `duplicateCheckService.cjs` 的 legacy 元数据补充复用，因此多后端转换应改 `withLegacyWordDocxFile()`，不要在业务侧另写分支。
+- 当前错误提示常量在 Main `documentParseErrors.cjs` 和 Renderer `DocumentParseNoticeProvider.tsx` 各有一份，文案只提示安装 LibreOffice；新增后端后需要同步改成“LibreOffice、WPS Office 或 Microsoft Word”。
+- 本机检测结果：`where soffice/winword/wps` 都未命中 PATH，但 `HKCR\\Word.Application\\CLSID` 存在，说明自动识别不能只靠命令路径；COM 注册或实际转换成功更可靠。
+- Microsoft Learn 文档确认 Word 支持 `Documents.Open()` 和 `Document.SaveAs2()`；`.doc -> .docx` 可用 `FileFormat=16`，但 Office 自动化存在弹窗、死锁和无人值守稳定性风险，必须加超时并失败回退。
+- 公开代码样例普遍使用 WPS COM ProgID `Kwps.Application` / `KWPS.Application` / `wps.Application`，Word 使用 `Word.Application`；WPS/Word 都可调用 `Documents.Open()` 后 `SaveAs2(..., FileFormat=16)`。
+- 已实现多后端顺序：`.wps` 优先 WPS，其次 LibreOffice，最后 Microsoft Word；其他 legacy Word 文件优先 LibreOffice，其次 Word，最后 WPS。每个后端都以生成 ZIP 头 `.docx` 为成功条件。
 - 废标项检查 Step03 的三类检查主请求已全部迁移到 Main 后台任务，当前失败根因是错别字 `collectJsonResponse()` 非流式全文 JSON 请求在 300 秒内未拿到完整响应；项目已有 `aiService.streamChat()` 且支持 `response_format: { type: 'json_object' }`，可直接用于后端到 AI 服务商的流式 JSON 主请求。
 - `aiService.cjs` 原有 `parseJsonContent()`、`repairJsonResponse()`、`collectJsonResponseWithConfig()` 已覆盖 balanced JSON 提取、修复和重试；流式主请求结束后的 JSON 解析失败应复用这些修复逻辑，而不是把完整长文本再走一次非流式请求。
 - 小米 `mimo-v2.5-pro` 逻辑谬误失败根因是流式主请求返回 JSON 字符串中存在非法反斜杠转义（如 `1\.`），修复请求也原样返回导致二次 `JSON.parse()` 失败；应在 Main 侧解析候选中增加本地非法转义修复，并增强 JSON 修复 prompt。

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,6 +30,55 @@ const PDF_GRID_MIN_WIDTH = 40;
 const PDF_GRID_MIN_HEIGHT = 12;
 const PDF_TEXT_DUPLICATE_TOLERANCE = 1;
 const PDF_TEXT_LINE_TOLERANCE = 3;
+const OFFICE_CONVERSION_TIMEOUT_MS = 180000;
+const WPS_WORD_PROG_IDS = ['Kwps.Application', 'KWPS.Application', 'wps.Application'];
+const MICROSOFT_WORD_PROG_IDS = ['Word.Application'];
+const POWERSHELL_OFFICE_CONVERT_SCRIPT = [
+  'param(',
+  '  [Parameter(Mandatory=$true)][string]$ProgId,',
+  '  [Parameter(Mandatory=$true)][string]$InputPath,',
+  '  [Parameter(Mandatory=$true)][string]$OutputPath',
+  ')',
+  '$ErrorActionPreference = "Stop"',
+  'function Release-ComObject([object]$ComObject) {',
+  '  if ($null -ne $ComObject) {',
+  '    try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($ComObject) } catch {}',
+  '  }',
+  '}',
+  'function Save-AsDocx([object]$Document, [string]$TargetPath) {',
+  '  $lastError = $null',
+  '  foreach ($format in @(16, 12)) {',
+  '    try {',
+  '      if (Test-Path -LiteralPath $TargetPath) { Remove-Item -LiteralPath $TargetPath -Force }',
+  '      try { $Document.SaveAs2($TargetPath, $format) } catch { $Document.SaveAs($TargetPath, $format) }',
+  '      if (Test-Path -LiteralPath $TargetPath) { return }',
+  '    } catch {',
+  '      $lastError = $_',
+  '    }',
+  '  }',
+  '  if ($null -ne $lastError) { throw $lastError }',
+  '  throw "save failed"',
+  '}',
+  '$app = $null',
+  '$doc = $null',
+  'try {',
+  '  $app = New-Object -ComObject $ProgId',
+  '  try { $app.Visible = $false } catch {}',
+  '  try { $app.DisplayAlerts = 0 } catch {}',
+  '  try { $app.AutomationSecurity = 3 } catch {}',
+  '  $doc = $app.Documents.Open($InputPath, $false, $true, $false)',
+  '  Save-AsDocx $doc $OutputPath',
+  '  if (!(Test-Path -LiteralPath $OutputPath)) { throw "output missing" }',
+  '} finally {',
+  '  if ($null -ne $doc) { try { $doc.Close($false) } catch {} }',
+  '  if ($null -ne $app) { try { $app.Quit() } catch {} }',
+  '  Release-ComObject $doc',
+  '  Release-ComObject $app',
+  '  [GC]::Collect()',
+  '  [GC]::WaitForPendingFinalizers()',
+  '}',
+  '',
+].join('\n');
 
 const { gfm } = turndownPluginGfm;
 const PDF_OP_NAMES = Object.fromEntries(Object.entries(OPS).map(([name, value]) => [value, name]));
@@ -728,8 +777,8 @@ function renderMarkdownTableRow(row) {
 }
 
 export async function withLegacyWordDocxFile(inputPath, callback) {
-  const soffice = await findLibreOfficeCommand();
-  if (!soffice) {
+  const backends = await buildLegacyWordConversionBackends(inputPath);
+  if (backends.length === 0) {
     throw new ConversionError('office_backend_missing', LIBREOFFICE_REQUIRED_MESSAGE, {
       inputPath,
       platform: process.platform,
@@ -737,21 +786,173 @@ export async function withLegacyWordDocxFile(inputPath, callback) {
   }
 
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'doc2md-node-'));
+  const attempts = [];
   try {
     const legacyInput = path.join(tempDir, `${safeStem(inputPath)}${await getLegacyConversionSuffix(inputPath)}`);
     await copyFile(inputPath, legacyInput);
-    await runLibreOfficeConvert(soffice, legacyInput, tempDir);
-    const files = await readdir(tempDir);
-    const docxName = files.find((file) => path.extname(file).toLowerCase() === '.docx');
-    if (!docxName) {
-      throw new ConversionError('office_conversion_failed', 'LibreOffice 未生成 DOCX 文件', {
-        inputPath,
-      });
+
+    for (const backend of backends) {
+      await removeGeneratedDocxFiles(tempDir);
+      const attempt = { backend: backend.label, type: backend.type };
+      attempts.push(attempt);
+      try {
+        const docxPath = await backend.convert(legacyInput, tempDir);
+        await assertGeneratedDocxFile(docxPath, backend.label, inputPath);
+        attempt.success = true;
+        return await callback(docxPath, tempDir);
+      } catch (error) {
+        attempt.error = summarizeConversionError(error);
+      }
     }
-    return await callback(path.join(tempDir, docxName), tempDir);
+
+    throw createOfficeConversionFailedError(inputPath, attempts);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+}
+
+async function buildLegacyWordConversionBackends(inputPath) {
+  const suffix = path.extname(inputPath).toLowerCase();
+  const [libreOfficeCommand, windowsComBackends] = await Promise.all([
+    findLibreOfficeCommand(),
+    findWindowsComOfficeBackends(),
+  ]);
+  const libreOfficeBackends = libreOfficeCommand
+    ? [{
+        type: 'libreoffice',
+        label: 'LibreOffice',
+        convert: async (legacyInput, outputDir) => runLibreOfficeDocxConversion(libreOfficeCommand, legacyInput, outputDir),
+      }]
+    : [];
+  const wpsBackends = windowsComBackends.filter((backend) => backend.type === 'wps');
+  const wordBackends = windowsComBackends.filter((backend) => backend.type === 'word');
+
+  if (suffix === '.wps') {
+    return [...wpsBackends, ...libreOfficeBackends, ...wordBackends];
+  }
+  return [...libreOfficeBackends, ...wordBackends, ...wpsBackends];
+}
+
+async function runLibreOfficeDocxConversion(soffice, legacyInput, outputDir) {
+  await runLibreOfficeConvert(soffice, legacyInput, outputDir);
+  const files = await readdir(outputDir);
+  const docxName = files.find((file) => path.extname(file).toLowerCase() === '.docx');
+  if (!docxName) {
+    throw new ConversionError('office_conversion_failed', 'LibreOffice 未生成 DOCX 文件', {
+      inputPath: legacyInput,
+    });
+  }
+  return path.join(outputDir, docxName);
+}
+
+async function findWindowsComOfficeBackends() {
+  if (process.platform !== 'win32') {
+    return [];
+  }
+
+  const powershell = await findPowerShellCommand();
+  if (!powershell) {
+    return [];
+  }
+
+  return [
+    ...(await findRegisteredComBackends(powershell, 'wps', 'WPS Office', WPS_WORD_PROG_IDS)),
+    ...(await findRegisteredComBackends(powershell, 'word', 'Microsoft Word', MICROSOFT_WORD_PROG_IDS)),
+  ];
+}
+
+async function findRegisteredComBackends(powershell, type, productName, progIds) {
+  const backends = [];
+  const checked = new Set();
+  for (const progId of progIds) {
+    const normalized = progId.toLowerCase();
+    if (checked.has(normalized)) {
+      continue;
+    }
+    checked.add(normalized);
+    if (!(await isComProgIdRegistered(progId))) {
+      continue;
+    }
+
+    backends.push({
+      type,
+      label: `${productName} (${progId})`,
+      convert: async (legacyInput, outputDir) => runWindowsComOfficeConvert(powershell, progId, legacyInput, outputDir),
+    });
+  }
+  return backends;
+}
+
+async function isComProgIdRegistered(progId) {
+  try {
+    await runProcess('reg.exe', ['query', `HKCR\\${progId}\\CLSID`], { timeoutMs: 10000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function runWindowsComOfficeConvert(powershell, progId, legacyInput, outputDir) {
+  const backendId = safeBackendId(progId);
+  const scriptPath = path.join(outputDir, `office-convert-${backendId}.ps1`);
+  const outputPath = path.join(outputDir, `${safeStem(legacyInput)}-${backendId}.docx`);
+  await writeFile(scriptPath, POWERSHELL_OFFICE_CONVERT_SCRIPT, 'utf8');
+  await runProcess(powershell, [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    scriptPath,
+    progId,
+    legacyInput,
+    outputPath,
+  ], { timeoutMs: OFFICE_CONVERSION_TIMEOUT_MS });
+  return outputPath;
+}
+
+async function removeGeneratedDocxFiles(outputDir) {
+  const files = await readdir(outputDir);
+  await Promise.all(files
+    .filter((file) => path.extname(file).toLowerCase() === '.docx')
+    .map((file) => rm(path.join(outputDir, file), { force: true })));
+}
+
+async function assertGeneratedDocxFile(docxPath, backendLabel, inputPath) {
+  if (!existsSync(docxPath)) {
+    throw new ConversionError('office_conversion_failed', `${backendLabel} 未生成 DOCX 文件`, {
+      inputPath,
+      backend: backendLabel,
+    });
+  }
+  const header = await readFileHeader(docxPath, ZIP_LOCAL_FILE_HEADER.length);
+  if (!isZipHeader(header)) {
+    throw new ConversionError('office_conversion_failed', `${backendLabel} 生成的文件不是有效 DOCX`, {
+      inputPath,
+      backend: backendLabel,
+    });
+  }
+}
+
+function createOfficeConversionFailedError(inputPath, attempts) {
+  const labels = [...new Set(attempts.map((attempt) => String(attempt.backend || '').replace(/\s*\([^)]*\)\s*$/, '')).filter(Boolean))];
+  const target = labels.length ? labels.join('、') : '本地 Office 转换组件';
+  return new ConversionError(
+    'office_conversion_failed',
+    `本地 Office 转换失败：已尝试 ${target}，请关闭正在运行的 Office/WPS 后重试，或手动另存为 .docx 后上传`,
+    { inputPath, platform: process.platform, attempts }
+  );
+}
+
+function summarizeConversionError(error) {
+  const raw = error instanceof Error ? error.message : String(error || '未知错误');
+  return normalizeNewlinesOnly(raw)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .join('；')
+    .slice(0, 500);
 }
 
 async function convertLegacyWordFile(inputPath, includeImages, imageResolver) {
@@ -793,6 +994,38 @@ async function findLibreOfficeCommand() {
       continue;
     }
     if (await canRunCommand(candidate, ['--version'])) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+async function findPowerShellCommand() {
+  if (process.platform !== 'win32') {
+    return null;
+  }
+
+  const candidates = [
+    process.env.POWERSHELL_PATH,
+    'powershell.exe',
+    'pwsh.exe',
+    'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+  ].map(normalizeCommandCandidate).filter(Boolean);
+
+  const checked = new Set();
+  for (const candidate of candidates) {
+    if (checked.has(candidate)) {
+      continue;
+    }
+    checked.add(candidate);
+
+    if (path.isAbsolute(candidate)) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+      continue;
+    }
+    if (await canRunCommand(candidate, ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'])) {
       return candidate;
     }
   }
@@ -1104,6 +1337,10 @@ async function resolveDataUrlImage(dataUrl, imageResolver, sourceName) {
 function safeStem(inputPath) {
   const stem = path.basename(inputPath, path.extname(inputPath));
   return stem.replace(/[^A-Za-z0-9._-]+/g, '_') || 'upload';
+}
+
+function safeBackendId(value) {
+  return String(value || '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'office';
 }
 
 function pathToFileUri(value) {

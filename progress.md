@@ -1,6 +1,8 @@
 # Progress
 
 ## Session Log
+- 开始 DOC/WPS 本地转换后端自动识别：已确认现有链路只在 `withLegacyWordDocxFile()` 中找 LibreOffice；本轮会保留后续 DOCX Markdown 提取，只新增 LibreOffice/WPS/Word 候选转换和统一提示。
+- 已完成 DOC/WPS 本地转换后端自动识别：`withLegacyWordDocxFile()` 现在按候选后端实际转换并校验 DOCX；Windows 通过 PowerShell COM 支持 WPS/Word；缺失提示已改为 LibreOffice/WPS Office/Microsoft Word 任一即可。验证通过 `node --check`、转换模块动态 import、`npm run build`、`git diff --check`；构建仍只有既有 chunk 体积警告，diff check 只有 LF/CRLF 提示。
 - 开始废标项检查流式检查与单项重试改造：已先按用户要求把流式 JSON 请求使用方法和 JSON 修复边界写入 `client/开发说明.md`；本轮不新增后端到页面的流式返回，只改 Main 到 AI 服务商的请求模式。
 - 已完成废标项检查流式检查与单项重试改造：Main 侧三类检查主请求改用 `streamChat`，JSON 解析失败复用原非流式修复链路；页面错误态新增只重试当前检查的按钮；验证通过 CJS `node --check`、`npm run build` 和 `git diff --check`，仅有既有 LF/CRLF 与 chunk 体积警告。
 - 已修复废标项检查流式进度导致的前端扰动：Main 侧不再把流式 chunk 接收字数写入 workspace，只保留阶段状态和最终结果；Renderer 后台任务事件同步时不再覆盖当前用户查看的 Step/Tab，避免切到错别字检查后被任务事件切回废标项检查。验证通过相关 CJS `node --check`、`npm run build` 和 `git diff --check`。
